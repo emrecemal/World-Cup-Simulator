@@ -62,6 +62,28 @@ def simulate_group(group, elos):
 
     return [team for team, _ in sorted_teams]
 
+def simulate_group_with_points(group, elos):
+    points = {team: 0 for team in group}
+
+    for i in range(len(group)):
+        for j in range(i+1, len(group)):
+            t1, t2 = group[i], group[j]
+            result = simulate_match(t1, t2, elos)
+
+            if result == "draw":
+                points[t1] += 1
+                points[t2] += 1
+            elif result == t1:
+                points[t1] += 3
+            else:
+                points[t2] += 3
+
+    teams = list(points.items())
+    random.shuffle(teams)
+    sorted_teams = sorted(teams, key=lambda x: x[1], reverse=True)
+
+    return sorted_teams  # [(team, points), ...]
+
 # -------------------------
 # MONTE CARLO (GROUP LEVEL)
 # -------------------------
