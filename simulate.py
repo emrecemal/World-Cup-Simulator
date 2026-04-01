@@ -10,10 +10,9 @@ def load_elo(csv_path):
     df = pd.read_csv(csv_path, sep=",", quotechar='"')
     return dict(zip(df["Country"], df["Column_4"]))  # "Column_4" has the ELO ratings
 
-import numpy as np
-import pandas as pd
-import random
-from collections import defaultdict
+def load_country_names(csv_path):
+    df = pd.read_csv(csv_path)
+    return dict(zip(df["Country"], df["Full_Name"]))
 
 # -------------------------
 # MATCH
@@ -106,6 +105,35 @@ def print_results(results):
             print(f"{team} | {probs[0]:.2f} | {probs[1]:.2f} | {probs[2]:.2f} | {probs[3]:.2f}")
 
 
+def results_to_markdown(results, country_map, filename="README.md"):
+    lines = []
+
+    for group, data in results.items():
+        lines.append(f"## {group}\n")
+        lines.append("| Team | 1st | 2nd | 3rd | 4th |")
+        lines.append("|------|-----|-----|-----|-----|")
+
+        # compute expected position
+        team_stats = []
+        for team, probs in data.items():
+            exp_pos = sum((i+1) * p for i, p in enumerate(probs))
+            team_stats.append((team, probs, exp_pos))
+
+        # sort by expected position (lower = better)
+        team_stats.sort(key=lambda x: x[2])
+
+        for team, probs, _ in team_stats:
+            name = country_map.get(team, team)
+            lines.append(
+                f"| {name} | {probs[0]:.2f} | {probs[1]:.2f} | {probs[2]:.2f} | {probs[3]:.2f} |"
+            )
+
+        lines.append("\n")
+
+    # write file
+    with open(filename, "w") as f:
+        f.write("\n".join(lines))
+
 # -------------------------
 # Groups
 # -------------------------
@@ -128,5 +156,7 @@ groups = [
 # RUN
 # -------------------------
 elos = load_elo("2026_World_Cup_Elo_Ratings_Full_Names.csv")
+country_map = load_country_names("2026_World_Cup_Elo_Ratings_Country_Codes.csv")
 results = run_group_simulations(groups, elos, n_sim=10000)
 print_results(results)
+results_to_markdown(results, country_map)
