@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 
-def calibrate_poisson_params(elo_home, elo_away, base_total_goals=2.7, home_advantage=50):
+def calibrate_poisson_params(elo_home, elo_away, base_total_goals, home_advantage=50):
     """
     Calibrates expected goals (lambda for home, mu for away) based on Elo ratings.
     Includes an optional home_advantage boost added directly to the home team's Elo.
@@ -20,7 +20,7 @@ def calibrate_poisson_params(elo_home, elo_away, base_total_goals=2.7, home_adva
     
     return lambda_, mu
 
-def dixon_coles_adjustment(x, y, lambda_, mu, rho=-0.12):
+def dixon_coles_adjustment(x, y, lambda_, mu, rho):
     """
     Returns the Dixon-Coles multiplier tau(x, y) to correct low-scoring match dependencies.
     """
@@ -35,7 +35,7 @@ def dixon_coles_adjustment(x, y, lambda_, mu, rho=-0.12):
     else:
         return 1.0
 
-def generate_probability_matrix(lambda_, mu, max_goals=10, rho=-0.12):
+def generate_probability_matrix(lambda_, mu, max_goals=10, rho=-0.16):
     """
     Generates a 2D grid of exact score probabilities adjusted by Dixon-Coles.
     """
@@ -74,6 +74,60 @@ def run_monte_carlo(prob_matrix, num_simulations=10000):
     
     return simulated_scores
 
+def calculate_expected_points(pred_x, pred_y, prob_matrix):
+    """
+    Calculates the Expected Points (EV) of a specific score prediction,
+    given the actual mathematical probability distribution.
+    """
+    expected_points = 0.0
+    max_goals = prob_matrix.shape[0] - 1
+    
+    for actual_x in range(max_goals + 1):
+        for actual_y in range(max_goals + 1):
+            prob = prob_matrix[actual_x, actual_y]
+            if prob <= 0:
+                continue
+                
+            pts = 0
+            # 1. Winner Selection (3 pts)
+            if np.sign(pred_x - pred_y) == np.sign(actual_x - actual_y):
+                pts += 3
+            
+            # 2. Exact Score (2 pts)
+            if pred_x == actual_x and pred_y == actual_y:
+                pts += 2
+                
+            # 3. Goals of one team (1 pt per correct team)
+            if pred_x == actual_x:
+                pts += 1
+            if pred_y == actual_y:
+                pts += 1
+                
+            # 4. Goal Difference (1 pt)
+            if (pred_x - pred_y) == (actual_x - actual_y):
+                pts += 1
+                
+            expected_points += prob * pts
+            
+    return expected_points
+
+def optimize_predictions_for_tournament(prob_matrix):
+    """
+    Evaluates all reasonable scoreline predictions to find the ones that yield
+    the highest Expected Points based on the tournament's specific scoring rules.
+    """
+    max_goals = 8
+    ev_results = []
+    
+    for pred_x in range(max_goals + 1):
+        for pred_y in range(max_goals + 1):
+            ev = calculate_expected_points(pred_x, pred_y, prob_matrix)
+            ev_results.append((f"{pred_x}-{pred_y}", ev))
+            
+    # Sort by highest Expected Value (EV)
+    ev_results.sort(key=lambda x: x[1], reverse=True)
+    return ev_results[:5]
+
 def predict_match(csv_path, home_team, away_team):
     # Load Elo ratings
     try:
@@ -92,37 +146,54 @@ def predict_match(csv_path, home_team, away_team):
         print(f"Error: Could not find '{home_team}' or '{away_team}' in the CSV file.")
         return
 
-    # 1. Calibrate Goal Parameters (Using a 50 Elo point home advantage)
-    if ("USA" or "Mexico" or "Canada" in home_team) or ("USA" or "Mexico" or "Canada" in away_team):
+    # 1. Host Nation Advantage (USA, Mexico, Canada)
+    home_advantage = 0
+    if home_team in ["USA", "Mexico", "Canada"] or away_team in ["USA", "Mexico", "Canada"]:
+         # Note: If an away team is the host, you might want to handle this differently in a broader system, 
+         # but this honors your current host-logic check.
         home_advantage = 50
-    else:
-        home_advantage = 0
-    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=2.7, home_advantage=home_advantage)
+
+    # ==========================================
+    # KNOCKOUT STAGE PARAMETERS APPLIED HERE
+    # ==========================================
+    KNOCKOUT_BASE_GOALS = 2.25 
+    KNOCKOUT_RHO = -0.16      
     
-    # 2. Build the adjusted probability distribution grid
-    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=-0.12)
+    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=KNOCKOUT_BASE_GOALS, home_advantage=home_advantage)
+    
+    # 2. Build the adjusted probability distribution grid using knockout Rho
+    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=KNOCKOUT_RHO)
     
     # 3. Execute 10,000 Monte Carlo Simulation runs
     simulations = run_monte_carlo(prob_matrix, num_simulations=10000)
+    
+    # 4. Calculate Expected Value (EV) for Tournament Points
+    top_ev_predictions = optimize_predictions_for_tournament(prob_matrix)
     
     # Count frequencies
     score_counts = Counter(simulations)
     top_5 = score_counts.most_common(5)
     
     # Output results
-    print(f"\n=== MATCH SIMULATION REPORT ===")
-    print(f"Fixture: {home_team} (Home) vs. {away_team} (Away)")
+    print(f"\n=== KNOCKOUT MATCH SIMULATION REPORT ===")
+    print(f"Fixture: {home_team} vs. {away_team}")
     print(f"Elo Ratings: {home_team} ({elo_home}) | {away_team} ({elo_away})")
     print(f"Calibrated Expected Goals (xG): {home_team}: {lambda_:.2f} | {away_team}: {mu:.2f}")
+    print(f"Model Parameters: Base Goals = {KNOCKOUT_BASE_GOALS}, Dixon-Coles Rho = {KNOCKOUT_RHO}")
     print("-" * 45)
-    print("TOP 5 MOST PROBABLE EXACT SCORES (Monte Carlo 10k runs):")
+    print("TOP 5 MOST PROBABLE EXACT SCORES (Regular Time - 90 Mins):")
     
     for rank, (score, count) in enumerate(top_5, 1):
         percentage = (count / 10000) * 100
         print(f"{rank}. Score: {score} ({percentage:.2f}% chance)")
 
-
+    print("-" * 45)
+    print("🏆 TOURNAMENT OPTIMIZED PICKS (Highest Expected Points) 🏆")
+    print("Strategy: These picks act as an umbrella, maximizing partial points across all likely outcomes.")
+    
+    for rank, (score, ev) in enumerate(top_ev_predictions, 1):
+        print(f"{rank}. Predict {score} (Expected Yield: {ev:.3f} points)")
 
 if __name__ == "__main__":
     # Use the CSV file path directly
-    predict_match("elo.csv", "Ghana", "Panama")
+    predict_match("elo.csv", "Spain", "Argentina")
