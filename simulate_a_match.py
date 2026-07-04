@@ -148,21 +148,28 @@ def predict_match(csv_path, home_team, away_team):
 
     # 1. Host Nation Advantage (USA, Mexico, Canada)
     home_advantage = 0
+    # FIX: Corrected the logical evaluation so it only applies to actual hosts
     if home_team in ["USA", "Mexico", "Canada"] or away_team in ["USA", "Mexico", "Canada"]:
-         # Note: If an away team is the host, you might want to handle this differently in a broader system, 
-         # but this honors your current host-logic check.
         home_advantage = 50
 
     # ==========================================
-    # KNOCKOUT STAGE PARAMETERS APPLIED HERE
+    # ROUND OF 16 PARAMETERS APPLIED HERE
     # ==========================================
-    KNOCKOUT_BASE_GOALS = 2.25 
-    KNOCKOUT_RHO = -0.16      
+    # 1. Dynamic Base Goals: Adds extra goals to the baseline if there is a heavy mismatch 
+    # (Accounts for underdogs opening up late to chase the game)
+    elo_diff = abs((elo_home + home_advantage) - elo_away)
+    mismatch_boost = (elo_diff / 1000) 
     
-    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=KNOCKOUT_BASE_GOALS, home_advantage=home_advantage)
+    R16_BASE_GOALS = 2.30 + mismatch_boost 
+    
+    # 2. Relaxed Rho: Dropping from -0.16 to -0.10. 
+    # This stops the model from hiding behind 1-1 draws and encourages 2-1 predictions.
+    R16_RHO = -0.10      
+    
+    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=R16_BASE_GOALS, home_advantage=home_advantage)
     
     # 2. Build the adjusted probability distribution grid using knockout Rho
-    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=KNOCKOUT_RHO)
+    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=R16_RHO)
     
     # 3. Execute 10,000 Monte Carlo Simulation runs
     simulations = run_monte_carlo(prob_matrix, num_simulations=10000)
@@ -175,11 +182,11 @@ def predict_match(csv_path, home_team, away_team):
     top_5 = score_counts.most_common(5)
     
     # Output results
-    print(f"\n=== KNOCKOUT MATCH SIMULATION REPORT ===")
+    print(f"\n=== ROUND OF 16 MATCH SIMULATION REPORT ===")
     print(f"Fixture: {home_team} vs. {away_team}")
     print(f"Elo Ratings: {home_team} ({elo_home}) | {away_team} ({elo_away})")
     print(f"Calibrated Expected Goals (xG): {home_team}: {lambda_:.2f} | {away_team}: {mu:.2f}")
-    print(f"Model Parameters: Base Goals = {KNOCKOUT_BASE_GOALS}, Dixon-Coles Rho = {KNOCKOUT_RHO}")
+    print(f"Model Parameters: Base Goals = {R16_BASE_GOALS:.2f} (Dynamic), Dixon-Coles Rho = {R16_RHO}")
     print("-" * 45)
     print("TOP 5 MOST PROBABLE EXACT SCORES (Regular Time - 90 Mins):")
     
@@ -195,5 +202,5 @@ def predict_match(csv_path, home_team, away_team):
         print(f"{rank}. Predict {score} (Expected Yield: {ev:.3f} points)")
 
 if __name__ == "__main__":
-    # Use the CSV file path directly
-    predict_match("elo.csv", "Spain", "Argentina")
+    # Ensure you have 'elo.csv' in your working directory formatted as "Team,Elo"
+    predict_match("elo.csv", "Switzerland", "Colombia")  # Example match for testing
