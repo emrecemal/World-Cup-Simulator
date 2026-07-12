@@ -3,12 +3,11 @@ import numpy as np
 import pandas as pd
 from collections import Counter
 
-def calibrate_poisson_params(elo_home, elo_away, base_total_goals, home_advantage=50):
+def calibrate_poisson_params(elo_home, elo_away, base_total_goals, home_advantage=0):
     """
     Calibrates expected goals (lambda for home, mu for away) based on Elo ratings.
-    Includes an optional home_advantage boost added directly to the home team's Elo.
     """
-    # Adjust home Elo for home-field advantage
+    # Adjust home Elo for home-field advantage (Set to 0 for neutral QF matches)
     adjusted_elo_home = elo_home + home_advantage
     
     # Calculate xG ratio based on Elo difference
@@ -35,7 +34,7 @@ def dixon_coles_adjustment(x, y, lambda_, mu, rho):
     else:
         return 1.0
 
-def generate_probability_matrix(lambda_, mu, max_goals=10, rho=-0.15):
+def generate_probability_matrix(lambda_, mu, max_goals=10, rho=-0.16):
     """
     Generates a 2D grid of exact score probabilities adjusted by Dixon-Coles.
     """
@@ -56,7 +55,7 @@ def generate_probability_matrix(lambda_, mu, max_goals=10, rho=-0.15):
     prob_matrix /= prob_matrix.sum()
     return prob_matrix
 
-def run_monte_carlo(prob_matrix, num_simulations=10_000):
+def run_monte_carlo(prob_matrix, num_simulations=10000):
     """
     Simulates the match outcomes N times based on the probability matrix.
     """
@@ -146,34 +145,27 @@ def predict_match(csv_path, home_team, away_team):
         print(f"Error: Could not find '{home_team}' or '{away_team}' in the CSV file.")
         return
 
-    # 1. Host Nation Advantage (USA, Mexico, Canada)
+    # 1. All Semi-Finalists are on neutral ground now.
     home_advantage = 0
-    # FIX: Corrected the logical evaluation so it only applies to actual hosts
-    if home_team in ["USA", "Mexico", "Canada"] or away_team in ["USA", "Mexico", "Canada"]:
-        home_advantage = 50
 
     # ==========================================
-    # ROUND OF 16 PARAMETERS APPLIED HERE
+    # SEMI-FINAL PARAMETERS APPLIED HERE
     # ==========================================
-    # 1. Dynamic Base Goals: Adds extra goals to the baseline if there is a heavy mismatch 
-    # (Accounts for underdogs opening up late to chase the game)
-    elo_diff = abs((elo_home + home_advantage) - elo_away)
+    # 1. Elite Clash: These are the top 4 teams in the world. 
+    # Goal expectations drop to the absolute minimum for standard time.
+    elo_diff = abs(elo_home - elo_away)
     mismatch_boost = (elo_diff / 2000) 
     
-    R16_BASE_GOALS = 2.30 + mismatch_boost
-    R8_BASE_GOALS = 2.20 + mismatch_boost  # Quarterfinals
-    BASE_GOALS = R8_BASE_GOALS  # Default to Quarterfinals unless specified otherwise
+    SF_BASE_GOALS = 2.15 + mismatch_boost 
     
-    # 2. Relaxed Rho: Dropping from -0.16 to -0.10. 
-    # This stops the model from hiding behind 1-1 draws and encourages 2-1 predictions.
-    R16_RHO = -0.10
-    R8_RHO = -0.15  # Quarterfinals
-    RHO = R8_RHO  # Default to Quarterfinals unless specified otherwise 
+    # 2. Rho: With evenly matched elite teams, fear of elimination is at its peak.
+    # Keep rho highly negative (-0.14) to cover 0-0 and 1-1 standard time draws.
+    SF_RHO = -0.14      
     
-    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=BASE_GOALS, home_advantage=home_advantage)
+    lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=SF_BASE_GOALS, home_advantage=home_advantage)
     
-    # 2. Build the adjusted probability distribution grid using knockout Rho
-    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=RHO)
+    # 2. Build the adjusted probability distribution grid using SF Rho
+    prob_matrix = generate_probability_matrix(lambda_, mu, max_goals=8, rho=SF_RHO)
     
     # 3. Execute 10,000 Monte Carlo Simulation runs
     simulations = run_monte_carlo(prob_matrix, num_simulations=10000)
@@ -186,11 +178,11 @@ def predict_match(csv_path, home_team, away_team):
     top_5 = score_counts.most_common(5)
     
     # Output results
-    print(f"\n=== ROUND OF 16 MATCH SIMULATION REPORT ===")
+    print(f"\n=== SEMI-FINAL MATCH SIMULATION REPORT ===")
     print(f"Fixture: {home_team} vs. {away_team}")
     print(f"Elo Ratings: {home_team} ({elo_home}) | {away_team} ({elo_away})")
     print(f"Calibrated Expected Goals (xG): {home_team}: {lambda_:.2f} | {away_team}: {mu:.2f}")
-    print(f"Model Parameters: Base Goals = {BASE_GOALS:.2f} (Dynamic), Dixon-Coles Rho = {RHO}")
+    print(f"Model Parameters: Base Goals = {SF_BASE_GOALS:.2f} (Dynamic), Dixon-Coles Rho = {SF_RHO}")
     print("-" * 45)
     print("TOP 5 MOST PROBABLE EXACT SCORES (Regular Time - 90 Mins):")
     
@@ -207,4 +199,4 @@ def predict_match(csv_path, home_team, away_team):
 
 if __name__ == "__main__":
     # Ensure you have 'elo.csv' in your working directory formatted as "Team,Elo"
-    predict_match("elo.csv", "Argentina", "Switzerland")  # Example match for testing
+    predict_match("elo.csv", "England", "Argentina")  # Example semi-final match
