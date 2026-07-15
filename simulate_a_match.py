@@ -156,11 +156,11 @@ def predict_match(csv_path, home_team, away_team):
     elo_diff = abs(elo_home - elo_away)
     mismatch_boost = (elo_diff / 2000) 
     
-    SF_BASE_GOALS = 2.15 + mismatch_boost 
+    SF_BASE_GOALS = 2.0 + mismatch_boost 
     
     # 2. Rho: With evenly matched elite teams, fear of elimination is at its peak.
     # Keep rho highly negative (-0.14) to cover 0-0 and 1-1 standard time draws.
-    SF_RHO = -0.14      
+    SF_RHO = -0.18    
     
     lambda_, mu = calibrate_poisson_params(elo_home, elo_away, base_total_goals=SF_BASE_GOALS, home_advantage=home_advantage)
     
@@ -199,4 +199,4 @@ def predict_match(csv_path, home_team, away_team):
 
 if __name__ == "__main__":
     # Ensure you have 'elo.csv' in your working directory formatted as "Team,Elo"
-    predict_match("elo.csv", "England", "Argentina")  # Example semi-final match
+    predict_match("elo.csv", "Spain", "Argentina")  # Example semi-final match
